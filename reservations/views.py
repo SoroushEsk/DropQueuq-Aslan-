@@ -15,7 +15,9 @@
             
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework.exceptions import ValidationError
 
+from rest_framework import serializers
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -24,14 +26,20 @@ from .serializers import ReservationCreateSerializer
 from .services import create_reservation
 
 
+
+
 class ReservationCreateView(APIView):
     def post(self, request):
         serializer = ReservationCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        
+        raw_key = request.headers.get("Idempotency-Key")
+        idempotency_key = serializers.UUIDField().run_validation(raw_key)
 
         try:
             reservation = create_reservation(
-                product_id=serializer.validated_data["product_id"]
+                product_id=serializer.validated_data["product_id"],
+                idempotency_key=idempotency_key,
             )
         except DjangoValidationError as exc:
             return Response(

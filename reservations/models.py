@@ -12,3 +12,9 @@ class Reservation(models.Model):
         CONFIRM = "confirm", "Confirm"
         
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    
+    idempotency_key = models.UUIDField(
+        null=True,
+        blank=True,
+        unique=True,
+    )
