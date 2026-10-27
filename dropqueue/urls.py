@@ -16,6 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+# from reservations.views import ReservationCreateView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -23,4 +24,5 @@ urlpatterns = [
     path('api/v1/inventory/', include('inventory.urls')),
     path('api/v1/reservations/', include('reservations.urls')),
     path('api/v1/fulfillment/', include('fulfillment.urls')),
+    # path("", ReservationCreateView.as_view(), name="reservation-create"),
 ]

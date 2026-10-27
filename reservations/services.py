@@ -24,7 +24,7 @@ def create_reservation(product_id):
     inventory.reserved += 1
     inventory.save(update_fields=["available", "reserved"])
     
-    reservation = Reservation().objects.create(
+    reservation = Reservation.objects.create(
         product_id_id=product_id,
         status=Reservation.Status.PENDING
     )
