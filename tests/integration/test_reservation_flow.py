@@ -2,15 +2,23 @@
 
 from django.test import TestCase
 from rest_framework.test import APIClient
+import uuid
+from unittest.mock import patch
+from django.db import IntegrityError
 
 from catalog.models import Product
 from inventory.models import Inventory
 from reservations.models import Reservation
+import uuid
+from reservations.services import create_reservation
 
 
 class ReservationFlowTests(TestCase):
     def setUp(self):
         self.client = APIClient()
+        
+        self.idempotency_key = str(uuid.uuid4())
+        self.client.defaults["HTTP_IDEMPOTENCY_KEY"] = self.idempotency_key
 
         self.product = Product.objects.create(
             name="Test Product",
@@ -128,3 +136,114 @@ class ReservationFlowTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, 405)
+        
+        
+    def test_same_idempotency_key_creates_only_one_reservation(self):
+        first_response = self.client.post(
+            self.url,
+            {"product_id": self.product.product_id},
+            format="json",
+        )
+
+        second_response = self.client.post(
+            self.url,
+            {"product_id": self.product.product_id},
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 201)
+
+        self.assertEqual(
+            first_response.data["reservation_id"],
+            second_response.data["reservation_id"],
+        )
+
+        self.assertEqual(Reservation.objects.count(), 1)
+
+        self.inventory.refresh_from_db()
+        self.assertEqual(self.inventory.available, 2)
+        self.assertEqual(self.inventory.reserved, 1)
+
+    def test_same_idempotency_key_for_different_products_returns_409(self):
+        second_product = Product.objects.create(
+            name="Second product",
+        )
+
+        second_inventory = Inventory.objects.create(
+            product_id=second_product,
+            on_hand=5,
+            available=5,
+            reserved=0,
+            fulfilled=0,
+        )
+
+        first_response = self.client.post(
+            self.url,
+            {"product_id": self.product.product_id},
+            format="json",
+        )
+
+        second_response = self.client.post(
+            self.url,
+            {"product_id": second_product.product_id},
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 409)
+
+        self.assertEqual(Reservation.objects.count(), 1)
+
+        self.inventory.refresh_from_db()
+        second_inventory.refresh_from_db()
+
+        self.assertEqual(self.inventory.available, 2)
+        self.assertEqual(second_inventory.available, 5)
+      
+      
+        
+    def test_missing_idempotency_key_returns_400(self):
+        self.client.defaults.pop("HTTP_IDEMPOTENCY_KEY", None)
+
+        response = self.client.post(
+            self.url,
+            {"product_id": self.product.product_id},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Reservation.objects.count(), 0)
+        
+        
+        
+    def test_invalid_idempotency_key_returns_400(self):
+        response = self.client.post(
+            self.url,
+            {"product_id": self.product.product_id},
+            format="json",
+            HTTP_IDEMPOTENCY_KEY="not-a-valid-uuid",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Reservation.objects.count(), 0)
+        
+        
+    def test_inventory_rolls_back_if_reservation_creation_fails(self):
+        idempotency_key = uuid.uuid4()
+
+        with patch(
+            "reservations.services.Reservation.objects.create",
+            side_effect=IntegrityError("Simulated database failure"),
+        ):
+            with self.assertRaises(IntegrityError):
+                create_reservation(
+                    product_id=self.product.product_id,
+                    idempotency_key=idempotency_key,
+                )
+
+        self.inventory.refresh_from_db()
+
+        self.assertEqual(self.inventory.available, 3)
+        self.assertEqual(self.inventory.reserved, 0)
+        self.assertEqual(Reservation.objects.count(), 0)

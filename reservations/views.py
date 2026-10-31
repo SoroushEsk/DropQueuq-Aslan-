@@ -16,6 +16,7 @@
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError
+# from .services import create_reservation, IdempotencyConflict
 
 from rest_framework import serializers
 from rest_framework import status
@@ -23,7 +24,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .serializers import ReservationCreateSerializer
-from .services import create_reservation
+from .services import create_reservation, IdempotencyConflict
 
 
 
@@ -41,6 +42,13 @@ class ReservationCreateView(APIView):
                 product_id=serializer.validated_data["product_id"],
                 idempotency_key=idempotency_key,
             )
+            
+        except IdempotencyConflict:
+            return Response(
+                {"detail": "Idempotency key was used for another product."},
+                status=status.HTTP_409_CONFLICT,
+            )
+            
         except DjangoValidationError as exc:
             return Response(
                 {"detail": exc.messages},
